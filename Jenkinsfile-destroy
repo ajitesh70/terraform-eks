@@ -3,45 +3,26 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        AWS_CREDS  = "aws-creds"
     }
 
     stages {
 
-        stage('Checkout Infra Code') {
+        stage('Checkout Terraform Repo') {
             steps {
                 git branch: 'main', url: 'https://github.com/ajitesh70/terraform-eks.git'
             }
         }
 
-        stage('Terraform Init') {
+        stage('Terraform Destroy') {
             steps {
-                withAWS(credentials: AWS_CREDS, region: AWS_REGION) {
-                    sh 'terraform init'
-                }
-            }
-        }
+                withAWS(credentials: 'aws-creds', region: "${AWS_REGION}") {
+                    sh '''
+                    echo "Initializing Terraform..."
+                    terraform init
 
-        stage('Terraform Destroy Plan') {
-            steps {
-                withAWS(credentials: AWS_CREDS, region: AWS_REGION) {
-                    sh 'terraform plan -destroy -out=tfplan-destroy'
-                }
-            }
-        }
-
-        stage('Approval Needed') {
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    input message: 'Are you SURE you want to DESTROY the entire EKS infrastructure?'
-                }
-            }
-        }
-
-        stage('Terraform Destroy Apply') {
-            steps {
-                withAWS(credentials: AWS_CREDS, region: AWS_REGION) {
-                    sh 'terraform apply -auto-approve tfplan-destroy'
+                    echo "Destroying Infrastructure..."
+                    terraform destroy -auto-approve -lock=false
+                    '''
                 }
             }
         }
