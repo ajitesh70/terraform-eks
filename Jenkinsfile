@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        ACTION = ""   // will become APPLY or DESTROY dynamically
+        ACTION = ""
     }
 
     stages {
@@ -18,39 +18,25 @@ pipeline {
             }
         }
 
-        /* 🔥 Ask user: Apply or Destroy infrastructure */
         stage('Select Action (Apply / Destroy)') {
             steps {
                 script {
                     ACTION = input(
-                        message: "Choose Terraform Action",
+                        message: "Select Terraform Action",
                         parameters: [
-                            choice(name: 'ACTION', choices: "APPLY\nDESTROY", description: "Select action")
+                            choice(name: 'ACTION', choices: "APPLY\nDESTROY", description: "APPLY = Create Infra, DESTROY = Delete Infra")
                         ]
                     )
-                    echo "Selected action: ${ACTION}"
+                    echo "Selected: ${ACTION}"
                 }
             }
         }
 
-        /* 🚀 Create backend only when APPLY is selected */
-        stage('Create Terraform Backend Infra') {
-            when { expression { ACTION == "APPLY" } }
-            steps {
-                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    dir('backend') {
-                        sh 'terraform init'
-                        sh 'terraform apply -auto-approve'
-                    }
-                }
-            }
-        }
-
-        /* 📌 Configure backend.tf dynamically */
-        stage('Configure Backend') {
-            when { expression { ACTION == "APPLY" } }
+        /* 🚀 Always create backend.tf before both APPLY & DESTROY */
+        stage('Generate backend.tf') {
             steps {
                 script {
+                    // These values were created first time and stored in backend/terraform.tfstate
                     def bucket = sh(script: 'terraform -chdir=backend output -raw bucket', returnStdout: true).trim()
                     def dynamodb_table = sh(script: 'terraform -chdir=backend output -raw dynamodb_table', returnStdout: true).trim()
 
@@ -68,7 +54,19 @@ terraform {
             }
         }
 
-        /* 🧠 Terraform Init — required for both APPLY and DESTROY */
+        /* 🔥 Only build backend on APPLY (If not already built) */
+        stage('Create Backend Infra (only first time)') {
+            when { expression { ACTION == "APPLY" } }
+            steps {
+                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
+                    dir('backend') {
+                        sh 'terraform init'
+                        sh 'terraform apply -auto-approve || true'  // if bucket already exists, continue
+                    }
+                }
+            }
+        }
+
         stage('Terraform Init') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -77,7 +75,7 @@ terraform {
             }
         }
 
-        stage('Terraform Plan (Only for APPLY)') {
+        stage('Terraform Plan (only on APPLY)') {
             when { expression { ACTION == "APPLY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -86,7 +84,7 @@ terraform {
             }
         }
 
-        stage('Approval Before Action') {
+        stage('Approval Before Execute') {
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
                     input message: "Proceed with ${ACTION}?"
@@ -94,7 +92,6 @@ terraform {
             }
         }
 
-        /* 🟢 APPLY or ❌ DESTROY based on selection */
         stage('Execute Terraform') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -109,18 +106,16 @@ terraform {
             }
         }
 
-        /* ⚠ Optional: Ask if backend should be deleted too */
-        stage('Destroy Backend Infra (OPTIONAL)') {
+        /* Optional: Delete backend infra also */
+        stage('Delete Backend (Optional)') {
             when { expression { ACTION == "DESTROY" } }
             steps {
                 script {
-                    def delete_backend = input(
-                        message: "Infra destroyed successfully. Delete Backend Resources also?",
-                        parameters: [
-                            choice(name: 'CONFIRM', choices: "NO\nYES", description: "Backend = S3 bucket & DynamoDB lock table")
-                        ]
+                    def remove_backend = input(
+                        message: "Cluster deleted. Delete S3 + DynamoDB too?",
+                        parameters: [choice(name: 'DELETE', choices: "NO\nYES")]
                     )
-                    if (delete_backend == "YES") {
+                    if (remove_backend == "YES") {
                         withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                             dir('backend') {
                                 sh "terraform init"
