@@ -20,15 +20,7 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh "terraform init"
-                }
-            }
-        }
-
-        stage('Terraform Plan') {
-            steps {
-                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh "terraform plan -out=tfplan"
+                    sh 'terraform init'
                 }
             }
         }
@@ -51,7 +43,10 @@ pipeline {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                     script {
                         if (ACTION == "APPLY") {
-                            sh "terraform apply -auto-approve tfplan"
+                            sh """
+                                terraform plan -out=tfplan
+                                terraform apply -auto-approve tfplan
+                            """
                         } else {
                             sh "terraform destroy -auto-approve"
                         }
