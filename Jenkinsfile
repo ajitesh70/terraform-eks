@@ -28,8 +28,8 @@ pipeline {
             }
         }
 
-        /* 🔥 First run only (creates backend resources) */
-        stage('Create Backend Infra if needed') {
+        /* Apply only first time */
+        stage('Create Backend Infra') {
             when { expression { ACTION == "APPLY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -38,15 +38,22 @@ pipeline {
                         sh 'terraform apply -auto-approve'
                     }
                 }
+                script {
+                    writeFile file: "backend_store.txt", text: """
+BUCKET=$(terraform -chdir=backend output -raw bucket)
+DDB=$(terraform -chdir=backend output -raw dynamodb_table)
+"""
+                }
             }
         }
 
-        /* 💯 Create backend.tf AFTER backend exists */
+        /* ALWAYS use stored backend values, never terraform output */
         stage('Generate backend.tf') {
             steps {
                 script {
-                    def bucket = sh(script: 'terraform -chdir=backend output -raw bucket', returnStdout: true).trim()
-                    def dynamodb_table = sh(script: 'terraform -chdir=backend output -raw dynamodb_table', returnStdout: true).trim()
+                    def store = readFile("backend_store.txt")
+                    def bucket = store.split("\n")[0].replace("BUCKET=", "").trim()
+                    def ddb = store.split("\n")[1].replace("DDB=", "").trim()
 
                     writeFile file: "backend.tf", text: """
 terraform {
@@ -54,7 +61,7 @@ terraform {
     bucket         = "${bucket}"
     key            = "eks/terraform.tfstate"
     region         = "${AWS_REGION}"
-    dynamodb_table = "${dynamodb_table}"
+    dynamodb_table = "${ddb}"
   }
 }
 """
@@ -99,12 +106,12 @@ terraform {
             }
         }
 
-        stage('Delete Backend (Optional)') {
+        stage('Delete Backend (optional)') {
             when { expression { ACTION == "DESTROY" } }
             steps {
                 script {
                     def delete_backend = input(
-                        message: "Cluster destroyed. Delete DynamoDB + S3 backend?",
+                        message: "Delete S3 + DynamoDB backend also?",
                         parameters: [choice(name: 'DELETE', choices: "NO\nYES")]
                     )
                     if (delete_backend == "YES") {
@@ -114,6 +121,7 @@ terraform {
                                 sh "terraform destroy -auto-approve"
                             }
                         }
+                        sh "rm -f backend_store.txt" // removes stored values
                     }
                 }
             }
