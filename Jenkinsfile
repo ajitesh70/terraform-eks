@@ -8,13 +8,16 @@ pipeline {
     }
 
     stages {
-
+        
         stage('Checkout Code') {
             steps {
+                cleanWs()
                 git branch: 'main', url: 'https://github.com/ajitesh70/terraform-eks.git'
-                cleanWs(deleteDirs: false)
             }
         }
+
+
+
 
         stage('Create Terraform Backend Infra') {
             steps {
