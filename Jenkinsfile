@@ -8,7 +8,9 @@ pipeline {
 
     stages {
 
-        stage('Clean Workspace') { steps { cleanWs() } }
+        stage('Clean Workspace') { 
+            steps { cleanWs() } 
+        }
 
         stage('Checkout Terraform Code') {
             steps {
@@ -28,32 +30,29 @@ pipeline {
             }
         }
 
-        /* Apply only first time */
-        stage('Create Backend Infra') {
+        /* First time creation (only on APPLY) */
+        stage('Create Backend Infra if needed') {
             when { expression { ACTION == "APPLY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                     dir('backend') {
                         sh 'terraform init'
-                        sh 'terraform apply -auto-approve'
+                        sh 'terraform apply -auto-approve || true'
                     }
-                }
-                script {
-                    writeFile file: "backend_store.txt", text: """
-BUCKET=$(terraform -chdir=backend output -raw bucket)
-DDB=$(terraform -chdir=backend output -raw dynamodb_table)
-"""
                 }
             }
         }
 
-        /* ALWAYS use stored backend values, never terraform output */
+        /* Generate backend.tf AFTER backend creation */
         stage('Generate backend.tf') {
             steps {
                 script {
-                    def store = readFile("backend_store.txt")
-                    def bucket = store.split("\n")[0].replace("BUCKET=", "").trim()
-                    def ddb = store.split("\n")[1].replace("DDB=", "").trim()
+                    def bucket = sh(script: 'terraform -chdir=backend output -raw bucket || true', returnStdout: true).trim()
+                    def dynamodb = sh(script: 'terraform -chdir=backend output -raw dynamodb_table || true', returnStdout: true).trim()
+
+                    if (!bucket || !dynamodb) {
+                        error("❌ Backend does not exist — run APPLY once before DESTROY")
+                    }
 
                     writeFile file: "backend.tf", text: """
 terraform {
@@ -61,7 +60,7 @@ terraform {
     bucket         = "${bucket}"
     key            = "eks/terraform.tfstate"
     region         = "${AWS_REGION}"
-    dynamodb_table = "${ddb}"
+    dynamodb_table = "${dynamodb}"
   }
 }
 """
@@ -106,12 +105,12 @@ terraform {
             }
         }
 
-        stage('Delete Backend (optional)') {
+        stage('Delete Backend (Optional)') {
             when { expression { ACTION == "DESTROY" } }
             steps {
                 script {
                     def delete_backend = input(
-                        message: "Delete S3 + DynamoDB backend also?",
+                        message: "Infra destroyed. Delete backend (S3 + DynamoDB) also?",
                         parameters: [choice(name: 'DELETE', choices: "NO\nYES")]
                     )
                     if (delete_backend == "YES") {
@@ -121,7 +120,6 @@ terraform {
                                 sh "terraform destroy -auto-approve"
                             }
                         }
-                        sh "rm -f backend_store.txt" // removes stored values
                     }
                 }
             }
