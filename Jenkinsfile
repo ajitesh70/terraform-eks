@@ -17,36 +17,6 @@ pipeline {
             }
         }
 
-        stage('Create Terraform Backend Infra') {
-            steps {
-                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    dir('backend') {
-                        sh 'terraform init'
-                        sh 'terraform apply -auto-approve'
-                    }
-                }
-            }
-        }
-
-        stage('Configure Backend') {
-            steps {
-                script {
-                    def bucket = sh(script: 'terraform -chdir=backend output -raw bucket', returnStdout: true).trim()
-                    def dynamodb_table = sh(script: 'terraform -chdir=backend output -raw dynamodb_table', returnStdout: true).trim()
-                    writeFile file: "backend.tf", text: """
-terraform {
-  backend "s3" {
-    bucket         = "${bucket}"
-    key            = "eks/terraform.tfstate"
-    region         = "${AWS_REGION}"
-    dynamodb_table = "${dynamodb_table}"
-  }
-}
-"""
-                }
-            }
-        }
-
         stage('Terraform Init') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -63,29 +33,29 @@ terraform {
             }
         }
 
-        stage('Approval') {
+        stage('Select Action') {
             steps {
-                timeout(time: 30, unit: 'MINUTES') {
-                    input message: "Approve APPLY Terraform?"
+                script {
+                    ACTION = input(
+                        id: "ACTION", message: "Select Terraform Action:",
+                        parameters: [
+                            choice(name: 'ACTION', choices: ["APPLY", "DESTROY"], description: 'Pick an action')
+                        ]
+                    )
                 }
             }
         }
 
-        stage('Terraform Apply') {
+        stage('Execute Terraform') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh "terraform apply -auto-approve tfplan"
-                }
-            }
-        }
-
-        stage('Update Kubeconfig') {
-            steps {
-                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh '''
-                        CLUSTER=$(terraform output -raw cluster_name)
-                        aws eks update-kubeconfig --name $CLUSTER --region ${AWS_REGION}
-                    '''
+                    script {
+                        if (ACTION == "APPLY") {
+                            sh "terraform apply -auto-approve tfplan"
+                        } else {
+                            sh "terraform destroy -auto-approve"
+                        }
+                    }
                 }
             }
         }
