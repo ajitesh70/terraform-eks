@@ -1,23 +1,21 @@
 pipeline {
     agent any
-    parameters {
-        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: 'Select Terraform action')
-    }
+
     environment {
         AWS_REGION = "ap-south-1"
     }
 
     stages {
-        
+
+        stage('Clean Workspace') {
+            steps { cleanWs() }
+        }
+
         stage('Checkout Code') {
             steps {
-                cleanWs()
                 git branch: 'main', url: 'https://github.com/ajitesh70/terraform-eks.git'
             }
         }
-
-
-
 
         stage('Create Terraform Backend Infra') {
             steps {
@@ -33,17 +31,15 @@ pipeline {
         stage('Configure Backend') {
             steps {
                 script {
-                    bucket = sh(script: "terraform -chdir=backend output -raw bucket", returnStdout: true).trim()
-                    lock_table = sh(script: "terraform -chdir=backend output -raw dynamodb_table", returnStdout: true).trim()
-
+                    def bucket = sh(script: 'terraform -chdir=backend output -raw bucket', returnStdout: true).trim()
+                    def dynamodb_table = sh(script: 'terraform -chdir=backend output -raw dynamodb_table', returnStdout: true).trim()
                     writeFile file: "backend.tf", text: """
 terraform {
   backend "s3" {
     bucket         = "${bucket}"
     key            = "eks/terraform.tfstate"
     region         = "${AWS_REGION}"
-    dynamodb_table = "${lock_table}"
-    encrypt        = true
+    dynamodb_table = "${dynamodb_table}"
   }
 }
 """
@@ -54,36 +50,36 @@ terraform {
         stage('Terraform Init') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh 'terraform init'
+                    sh "terraform init"
                 }
             }
         }
 
         stage('Terraform Plan') {
-            when { expression { params.ACTION == 'apply' }}
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh 'terraform plan -out tfplan'
+                    sh "terraform plan -out=tfplan"
                 }
             }
         }
 
-        stage('Terraform Apply or Destroy') {
+        stage('Approval') {
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: "Approve APPLY Terraform?"
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    script {
-                        if (params.ACTION == 'apply') {
-                            sh 'terraform apply -auto-approve tfplan'
-                        } else {
-                            sh 'terraform destroy -auto-approve'
-                        }
-                    }
+                    sh "terraform apply -auto-approve tfplan"
                 }
             }
         }
 
         stage('Update Kubeconfig') {
-            when { expression { params.ACTION == 'apply' }}
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                     sh '''
