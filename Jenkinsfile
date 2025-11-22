@@ -3,13 +3,15 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
+        BUCKET_NAME = "ajitesh-tf-backend-lxjg6stb"        // update once
+        LOCK_TABLE_NAME = "terraform-lock-lxjg6stb"        // update once
         ACTION = ""
     }
 
     stages {
 
-        stage('Clean Workspace') { 
-            steps { cleanWs() } 
+        stage('Clean Workspace') {
+            steps { cleanWs() }
         }
 
         stage('Checkout Terraform Code') {
@@ -30,37 +32,17 @@ pipeline {
             }
         }
 
-        /* First time creation (only on APPLY) */
-        stage('Create Backend Infra if needed') {
-            when { expression { ACTION == "APPLY" } }
-            steps {
-                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    dir('backend') {
-                        sh 'terraform init'
-                        sh 'terraform apply -auto-approve || true'
-                    }
-                }
-            }
-        }
-
-        /* Generate backend.tf AFTER backend creation */
+        /* 💥 Always generate backend.tf (no output dependency) */
         stage('Generate backend.tf') {
             steps {
                 script {
-                    def bucket = sh(script: 'terraform -chdir=backend output -raw bucket || true', returnStdout: true).trim()
-                    def dynamodb = sh(script: 'terraform -chdir=backend output -raw dynamodb_table || true', returnStdout: true).trim()
-
-                    if (!bucket || !dynamodb) {
-                        error("❌ Backend does not exist — run APPLY once before DESTROY")
-                    }
-
                     writeFile file: "backend.tf", text: """
 terraform {
   backend "s3" {
-    bucket         = "${bucket}"
+    bucket         = "${BUCKET_NAME}"
     key            = "eks/terraform.tfstate"
     region         = "${AWS_REGION}"
-    dynamodb_table = "${dynamodb}"
+    dynamodb_table = "${LOCK_TABLE_NAME}"
   }
 }
 """
@@ -76,7 +58,7 @@ terraform {
             }
         }
 
-        stage('Terraform Plan (only on APPLY)') {
+        stage('Terraform Plan (Apply only)') {
             when { expression { ACTION == "APPLY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
@@ -85,7 +67,7 @@ terraform {
             }
         }
 
-        stage('Approval Before Execute') {
+        stage('Approval Before Action') {
             steps {
                 input message: "Proceed with ${ACTION}?"
             }
@@ -99,26 +81,6 @@ terraform {
                             sh "terraform apply -auto-approve tfplan"
                         } else {
                             sh "terraform destroy -auto-approve"
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Delete Backend (Optional)') {
-            when { expression { ACTION == "DESTROY" } }
-            steps {
-                script {
-                    def delete_backend = input(
-                        message: "Infra destroyed. Delete backend (S3 + DynamoDB) also?",
-                        parameters: [choice(name: 'DELETE', choices: "NO\nYES")]
-                    )
-                    if (delete_backend == "YES") {
-                        withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                            dir('backend') {
-                                sh "terraform init"
-                                sh "terraform destroy -auto-approve"
-                            }
                         }
                     }
                 }
