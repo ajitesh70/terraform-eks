@@ -3,9 +3,9 @@ pipeline {
 
     environment {
         AWS_REGION      = "ap-south-1"
-        BUCKET_NAME     = "ajitesh-tf-backend-lxjg6stb"
-        LOCK_TABLE_NAME = "terraform-lock-lxjg6stb"
-        CLUSTER_NAME    = "demo-eks"   // update if cluster name is different
+        BUCKET_NAME     = "ajitesh-tf-backend"     // NEW bucket you created
+        LOCK_TABLE_NAME = "terraform-lock"        // NEW DynamoDB table you created
+        CLUSTER_NAME    = "demo-eks"              // EKS cluster name
         ACTION = ""
     }
 
@@ -68,7 +68,7 @@ terraform {
             }
         }
 
-        /*********** SAFE DESTROY FIX (only runs if destroy) ***********/
+        /*********** SAFE DESTROY FIX (only executes when destroying) ***********/
         stage("Cleanup Workloads Before Destroy") {
             when { expression { ACTION == "DESTROY" } }
             steps {
@@ -79,7 +79,7 @@ terraform {
                         echo "Updating kubeconfig..."
                         aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
 
-                        echo "Deleting Kubernetes workloads so destroy will not fail..."
+                        echo "Deleting Kubernetes workloads before destroy..."
                         kubectl delete deployments --all -A || true
                         kubectl delete statefulsets --all -A || true
                         kubectl delete services --all -A || true
@@ -93,7 +93,7 @@ terraform {
                 }
             }
         }
-        /****************************************************************/
+        /************************************************************************/
 
         stage('Execute Terraform') {
             steps {
