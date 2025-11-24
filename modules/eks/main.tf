@@ -9,11 +9,18 @@ resource "aws_vpc" "vpc" {
 }
 
 resource "aws_subnet" "public" {
-  count                   = 2
+  count                   = length(var.public_subnet_cidrs)
   vpc_id                  = aws_vpc.vpc.id
-  cidr_block              = cidrsubnet("10.0.0.0/16", 8, count.index)
+  cidr_block              = var.public_subnet_cidrs[count.index]
   availability_zone       = data.aws_availability_zones.az.names[count.index]
   map_public_ip_on_launch = true
+}
+
+resource "aws_subnet" "private" {
+  count             = length(var.private_subnet_cidrs)
+  vpc_id            = aws_vpc.vpc.id
+  cidr_block        = var.private_subnet_cidrs[count.index]
+  availability_zone = data.aws_availability_zones.az.names[count.index]
 }
 
 resource "aws_internet_gateway" "igw" {
@@ -31,7 +38,7 @@ resource "aws_route" "route" {
 }
 
 resource "aws_route_table_association" "assoc" {
-  count          = 2
+  count          = length(var.public_subnet_cidrs)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.rt.id
 }
@@ -89,11 +96,11 @@ resource "aws_iam_role_policy_attachment" "node_pol3" {
 #############################################
 
 resource "aws_eks_cluster" "cluster" {
-  name     = "my-eks-2"
+  name     = var.cluster_name
   role_arn = aws_iam_role.cluster_role.arn
 
   vpc_config {
-    subnet_ids = aws_subnet.public[*].id
+    subnet_ids = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
   }
 
   depends_on = [
@@ -117,7 +124,7 @@ resource "aws_eks_node_group" "node_group" {
     min_size     = 1
   }
 
-  subnet_ids = aws_subnet.public[*].id
+  subnet_ids = aws_subnet.private[*].id
 
   depends_on = [
     aws_eks_cluster.cluster,
