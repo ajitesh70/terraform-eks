@@ -48,7 +48,7 @@ resource "aws_route_table_association" "assoc" {
 #############################################
 
 resource "aws_eip" "nat_eip" {
-  vpc = true
+  domain = "vpc"
 }
 
 resource "aws_nat_gateway" "nat" {
