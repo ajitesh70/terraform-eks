@@ -3,9 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        BUCKET_NAME = "ajitesh-tf-backend-lxjg6stb"        // update once
-        LOCK_TABLE_NAME = "terraform-lock-lxjg6stb"        // update once
-        ACTION = ""
+        BUCKET_NAME = "ajitesh-tf-backend-lxjg6stb"
+        LOCK_TABLE_NAME = "terraform-lock-lxjg6stb"
     }
 
     stages {
@@ -20,23 +19,9 @@ pipeline {
             }
         }
 
-        stage('Select Action (Apply / Destroy)') {
-            steps {
-                script {
-                    ACTION = input(
-                        message: "Select Terraform Action",
-                        parameters: [choice(name: 'ACTION', choices: "APPLY\nDESTROY")]
-                    )
-                    echo "Selected: ${ACTION}"
-                }
-            }
-        }
-
-        /* 💥 Always generate backend.tf (no output dependency) */
         stage('Generate backend.tf') {
             steps {
-                script {
-                    writeFile file: "backend.tf", text: """
+                writeFile file: "backend.tf", text: """
 terraform {
   backend "s3" {
     bucket         = "${BUCKET_NAME}"
@@ -46,7 +31,6 @@ terraform {
   }
 }
 """
-                }
             }
         }
 
@@ -58,8 +42,7 @@ terraform {
             }
         }
 
-        stage('Terraform Plan (Apply only)') {
-            when { expression { ACTION == "APPLY" } }
+        stage('Terraform Plan') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                     sh "terraform plan -out=tfplan"
@@ -67,22 +50,16 @@ terraform {
             }
         }
 
-        stage('Approval Before Action') {
+        stage('Approval Before Apply') {
             steps {
-                input message: "Proceed with ${ACTION}?"
+                input message: "Proceed with Terraform APPLY?"
             }
         }
 
-        stage('Execute Terraform') {
+        stage('Terraform Apply') {
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    script {
-                        if (ACTION == "APPLY") {
-                            sh "terraform apply -auto-approve tfplan"
-                        } else {
-                            sh "terraform destroy -auto-approve"
-                        }
-                    }
+                    sh "terraform apply -auto-approve tfplan"
                 }
             }
         }
