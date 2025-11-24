@@ -140,16 +140,15 @@ resource "aws_eks_cluster" "cluster" {
 #############################################
 # NODE GROUP
 #############################################
-
 resource "aws_eks_node_group" "node_group" {
   cluster_name    = aws_eks_cluster.cluster.name
   node_group_name = "cheap-ng"
   node_role_arn   = aws_iam_role.node_role.arn
-  instance_types  = ["t3.micro"]
+  instance_types  = ["t3a.medium"]    # FIXED (more pod capacity)
 
   scaling_config {
-    desired_size = 1
-    max_size     = 1
+    desired_size = 2                  # FIXED
+    max_size     = 2                  # FIXED
     min_size     = 1
   }
 
