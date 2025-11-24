@@ -1,6 +1,6 @@
-#############################################
+#################################################
 # VPC + SUBNETS
-#############################################
+#################################################
 
 resource "aws_vpc" "vpc" {
   cidr_block           = "10.0.0.0/16"
@@ -43,9 +43,9 @@ resource "aws_route_table_association" "assoc" {
   route_table_id = aws_route_table.rt.id
 }
 
-#############################################
+#################################################
 # NAT GATEWAY FOR PRIVATE SUBNETS
-#############################################
+#################################################
 
 resource "aws_eip" "nat_eip" {
   domain = "vpc"
@@ -72,9 +72,9 @@ resource "aws_route_table_association" "private_assoc" {
   route_table_id = aws_route_table.private_rt.id
 }
 
-#############################################
+#################################################
 # IAM ROLES FOR EKS
-#############################################
+#################################################
 
 resource "aws_iam_role" "cluster_role" {
   name               = "eks-cluster-role"
@@ -120,9 +120,9 @@ resource "aws_iam_role_policy_attachment" "node_pol3" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-#############################################
+#################################################
 # EKS CLUSTER
-#############################################
+#################################################
 
 resource "aws_eks_cluster" "cluster" {
   name     = var.cluster_name
@@ -137,18 +137,18 @@ resource "aws_eks_cluster" "cluster" {
   ]
 }
 
-#############################################
-# NODE GROUP
-#############################################
+#################################################
+# NODE GROUP — t3.medium (final solution)
+#################################################
 
 resource "aws_eks_node_group" "node_group" {
   cluster_name    = aws_eks_cluster.cluster.name
   node_group_name = "cheap-ng"
   node_role_arn   = aws_iam_role.node_role.arn
-  instance_types  = ["t3.micro"]   # FREE-TIER SAFE + MySQL can schedule
+  instance_types  = ["t3.medium"]   # <— FINAL & STABLE
 
   scaling_config {
-    desired_size = 2               # Enough for MySQL + two web pods
+    desired_size = 2
     max_size     = 2
     min_size     = 1
   }
@@ -163,7 +163,7 @@ resource "aws_eks_node_group" "node_group" {
   ]
 }
 
-#############################################
+#################################################
 # Get AZ names
-#############################################
+#################################################
 data "aws_availability_zones" "az" {}
