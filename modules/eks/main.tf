@@ -1,6 +1,3 @@
-provider "aws" {
-  region = var.region
-}
 
 ##########################
 # Cheapest VPC (Public Only)
@@ -59,7 +56,7 @@ resource "aws_iam_role_policy_attachment" "cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-resource "aws_eks_cluster" "eks" {
+resource "aws_eks_cluster" "cluster" {
   name     = var.cluster_name
   role_arn = aws_iam_role.cluster_role.arn
   vpc_config {
@@ -92,8 +89,8 @@ resource "aws_iam_role_policy_attachment" "node_pol3" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-resource "aws_eks_node_group" "nodes" {
-  cluster_name    = aws_eks_cluster.eks.name
+resource "aws_eks_node_group" "node_group" {
+  cluster_name    = aws_eks_cluster.cluster.name
   node_group_name = "cheap-ng"
   node_role_arn   = aws_iam_role.node_role.arn
   subnet_ids      = [aws_subnet.public.id]
