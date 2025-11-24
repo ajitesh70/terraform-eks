@@ -2,20 +2,31 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = "ap-south-1"
-        BUCKET_NAME = "ajitesh-tf-backend-lxjg6stb"
+        AWS_REGION      = "ap-south-1"
+        BUCKET_NAME     = "ajitesh-tf-backend-lxjg6stb"
         LOCK_TABLE_NAME = "terraform-lock-lxjg6stb"
+        CLUSTER_NAME    = "demo-eks"   // update if cluster name is different
+        ACTION = ""
     }
 
     stages {
 
-        stage('Clean Workspace') {
-            steps { cleanWs() }
+        stage('Checkout') {
+            steps {
+                cleanWs()
+                git branch: 'main', url: 'https://github.com/ajitesh70/terraform-eks.git'
+            }
         }
 
-        stage('Checkout Terraform Code') {
+        stage('Select Action: APPLY or DESTROY') {
             steps {
-                git branch: 'main', url: 'https://github.com/ajitesh70/terraform-eks.git'
+                script {
+                    ACTION = input(
+                        message: "Select Terraform Action",
+                        parameters: [choice(name: 'ACTION', choices: "APPLY\nDESTROY")]
+                    )
+                    echo "Selected: ${ACTION}"
+                }
             }
         }
 
@@ -42,7 +53,8 @@ terraform {
             }
         }
 
-        stage('Terraform Plan') {
+        stage('Terraform Plan (APPLY only)') {
+            when { expression { ACTION == "APPLY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
                     sh "terraform plan -out=tfplan"
@@ -50,16 +62,49 @@ terraform {
             }
         }
 
-        stage('Approval Before Apply') {
+        stage('Approval') {
             steps {
-                input message: "Proceed with Terraform APPLY?"
+                input message: "Proceed with ${ACTION}?"
             }
         }
 
-        stage('Terraform Apply') {
+        /*********** SAFE DESTROY FIX (only runs if destroy) ***********/
+        stage("Cleanup Workloads Before Destroy") {
+            when { expression { ACTION == "DESTROY" } }
             steps {
                 withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
-                    sh "terraform apply -auto-approve tfplan"
+                    script {
+                        sh """
+                        set +e
+                        echo "Updating kubeconfig..."
+                        aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+
+                        echo "Deleting Kubernetes workloads so destroy will not fail..."
+                        kubectl delete deployments --all -A || true
+                        kubectl delete statefulsets --all -A || true
+                        kubectl delete services --all -A || true
+                        kubectl delete ingress --all -A || true
+                        kubectl delete pods --all -A || true
+
+                        echo "Waiting for load balancers and ENIs to detach..."
+                        sleep 60
+                        """
+                    }
+                }
+            }
+        }
+        /****************************************************************/
+
+        stage('Execute Terraform') {
+            steps {
+                withAWS(region: "${AWS_REGION}", credentials: 'aws-creds') {
+                    script {
+                        if (ACTION == "APPLY") {
+                            sh "terraform apply -auto-approve tfplan"
+                        } else {
+                            sh "terraform destroy -auto-approve"
+                        }
+                    }
                 }
             }
         }
